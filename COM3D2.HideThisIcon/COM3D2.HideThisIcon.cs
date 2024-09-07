@@ -8,6 +8,10 @@ using UnityEngine;
 using Newtonsoft.Json;
 using System.IO;
 using UnityEngine.UI;
+using System.Diagnostics;
+using wf;
+using System;
+using UnityEngine.SceneManagement;
 
 
 namespace COM3D2.HideThisIcon
@@ -31,6 +35,9 @@ namespace COM3D2.HideThisIcon
         private static UISprite partPanelBase;
         private static UISprite itemPanelBase;
         private static UISprite setPanelBase;
+
+
+        private static int childListAccessCount = 0;
 
         private void Awake()
         {
@@ -60,22 +67,36 @@ namespace COM3D2.HideThisIcon
             }
         }
 
+        private static void LoadJson(string path)
+        {
+            if (File.Exists(path))
+            {
+                string json = File.ReadAllText(path);
+                hiddenMenus = JsonConvert.DeserializeObject<HashSet<string>>(json);
+            }
+        }
+
+        private static void SaveJson(string path)
+        {
+            File.WriteAllText(path, JsonConvert.SerializeObject(hiddenMenus));
+        }
+
         private static void ToggleMode(SceneEdit sceneEdit, bool forceOff = false)
         {
             showHiddenIcons = !forceOff && !showHiddenIcons;
 
 #if DEBUG
-            Logger.LogDebug($"showHiddenIcons was set to {showHiddenIcons}");
+            Logger.LogInfo($"showHiddenIcons was set to {showHiddenIcons}");
 #endif
 
             //refresh the current panel
-            var menuButtonList = sceneEdit.m_listBtnMenuItem.Where(m => hiddenMenus.Contains(m.gcBtnEdit.m_MenuItem.m_strMenuFileName))
-                                 .Select(b => b.gcBtnEdit);
+            //var menuButtonList = sceneEdit.m_listBtnMenuItem.Where(m => hiddenMenus.Contains(m.gcBtnEdit.m_MenuItem.m_strMenuFileName))
+            //                                                .Select(b => b.gcBtnEdit);
 
-            SetIconState(menuButtonList);
-            sceneEdit.m_Panel_MenuItem.gcUIGrid?.Reposition();
-            sceneEdit.m_Panel_SetItem.gcUIGrid?.Reposition();
-            sceneEdit.m_Panel_MenuItem.ResetScrollPos(0f);
+            //SetIconState(menuButtonList);
+            //sceneEdit.m_Panel_MenuItem.gcUIGrid?.Reposition();
+            //sceneEdit.m_Panel_SetItem.gcUIGrid?.Reposition();
+            //sceneEdit.m_Panel_MenuItem.ResetScrollPos(0f);
 
             SetBackgroundColor();
 
@@ -86,6 +107,9 @@ namespace COM3D2.HideThisIcon
 
         private static void SetIconState(IEnumerable<ButtonEdit> buttonList)
         {
+#if DEBUG
+            Logger.LogInfo($"Set State for {buttonList.Count()} icons");
+#endif
             foreach (var button in buttonList)
             {
                 if (showHiddenIcons)
@@ -112,19 +136,7 @@ namespace COM3D2.HideThisIcon
             if (setPanelBase != null) setPanelBase.color = showHiddenIcons ? Color.red : Color.white;
         }
 
-        private static void LoadJson(string path)
-        {
-            if (File.Exists(path))
-            {
-                string json = File.ReadAllText(path);
-                hiddenMenus = JsonConvert.DeserializeObject<HashSet<string>>(json);
-            }
-        }
 
-        private static void SaveJson(string path)
-        {
-            File.WriteAllText(path, JsonConvert.SerializeObject(hiddenMenus));
-        }
 
         static class HideThisIconPatch
         {
@@ -132,6 +144,11 @@ namespace COM3D2.HideThisIcon
             [HarmonyPrefix]
             public static bool HandleClickPrefix(ref SceneEdit __instance)
             {
+#if DEBUG
+                Logger.LogMessage("---------------------------------------------");
+                childListAccessCount = 0;
+#endif
+
                 bool isRightClick = Input.GetMouseButtonUp(1);
 
                 ButtonEdit buttonEdit = UIButton.current?.GetComponentInChildren<ButtonEdit>();
@@ -146,7 +163,7 @@ namespace COM3D2.HideThisIcon
                         {
                             string menuFileName = buttonEdit.m_MenuItem.m_strMenuFileName;
 #if DEBUG                            
-                            Logger.LogDebug($"Right Click was registered on {menuFileName}");
+                            Logger.LogInfo($"Right Click was registered on {menuFileName}");
 #endif
                             UI2DSprite buttonSprite = UIButton.current.GetComponentInChildren<UI2DSprite>();
 
@@ -185,10 +202,11 @@ namespace COM3D2.HideThisIcon
                 if (buttonEdit != null && buttonEdit.m_PartsType != null)
                 {
                     var menuButtonList = __instance.m_listBtnMenuItem.Where(m => hiddenMenus.Contains(m.gcBtnEdit.m_MenuItem.m_strMenuFileName))
-                                         .Select(b => b.gcBtnEdit);
+                                                                     .Select(b => b.gcBtnEdit);
 
                     SetIconState(menuButtonList);
-                    __instance.m_Panel_MenuItem.gcUIGrid.Reposition();
+                    __instance.m_Panel_MenuItem.gcUIGrid?.Reposition();
+                    __instance.m_Panel_SetItem.gcUIGrid?.Reposition();
                 }
             }
 
@@ -197,7 +215,23 @@ namespace COM3D2.HideThisIcon
             [HarmonyPostfix]
             public static void GetChildListPostFix(ref List<Transform> __result)
             {
-                __result = __result.Where(c => c.gameObject.activeSelf).ToList();
+                if (SceneManager.GetActiveScene().name != "SceneEdit") return;
+
+#if DEBUG
+                childListAccessCount++;
+                Logger.LogInfo($"Child List Access Count = {childListAccessCount}");
+                //Logger.LogWarning($"StrackTrace: {Environment.StackTrace}");
+
+                Stopwatch sw = new Stopwatch();
+                sw.Start();
+                Logger.LogInfo($"Old Child List Count: {__result.Count}");
+#endif
+                    __result = __result.Where(c => c.gameObject.activeSelf).ToList();
+#if DEBUG
+                Logger.LogInfo($"New Child List Count: {__result.Count}");
+                sw.Stop();
+                Logger.LogInfo($"List creation time: {sw.ElapsedMilliseconds}ms");
+#endif
             }
         }
     }
